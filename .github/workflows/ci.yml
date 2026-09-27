@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -e '.[dev]'
+      - run: ruff format --check .
+      - run: ruff check .
+      - run: mypy
+      - run: pytest
+
+  package:
+    name: Wheel and source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Install wheel in a clean environment
+        run: |
+          python -m venv /tmp/simply-connect-wheel
+          /tmp/simply-connect-wheel/bin/pip install dist/*.whl
+          /tmp/simply-connect-wheel/bin/python -c 'from simply_connect import SimplyConnectClient; print(SimplyConnectClient)'
+      - name: Install source distribution in a clean environment
+        run: |
+          python -m venv /tmp/simply-connect-sdist
+          /tmp/simply-connect-sdist/bin/pip install dist/*.tar.gz
+          /tmp/simply-connect-sdist/bin/python -c 'import simply_connect; print(simply_connect.__version__)'
+
+  contract:
+    name: External API contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Checkout canonical OpenAPI contract
+        uses: actions/checkout@v6
+        with:
+          repository: karlos1998/modern-simply-connect-api
+          ssh-key: ${{ secrets.API_CONTRACT_DEPLOY_KEY }}
+          path: api-contract
+          sparse-checkout: contracts/openapi/v1/openapi.json
+          sparse-checkout-cone-mode: false
+      - run: python scripts/verify_openapi.py api-contract/contracts/openapi/v1/openapi.json
+
